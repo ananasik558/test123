@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_USER: user          # ← Логин
+      POSTGRES_PASSWORD: password  # ← Пароль
+      POSTGRES_DB: courier_db      # ← Имя базы
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d courier_db"]  # ← Проверка с правильным user
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: "osrm-routed --algorithm=mld /data/map.osrm"
+    volumes:
+      - ./osrm/data:/data  # ← Исправлено: один слэш, без пробелов
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./backend:/app  # ← Исправлено: один слэш
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      osrm:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/courier_db
+      OSRM_URL: http://osrm:5000
+  
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+volumes:
+  pgdata:
